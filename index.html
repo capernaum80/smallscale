@@ -13,19 +13,60 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <style>
-    :root { color-scheme: light; }
-    * { box-sizing: border-box; }
+    :root {
+      color-scheme: light;
+      --drop-blue:#247dcc;
+      --drop-blue-dark:#1767ae;
+      --border:#d8dee5;
+    }
+    * { box-sizing:border-box; }
     html, body { margin:0; min-height:100%; background:#fff; color:#111; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-      -webkit-text-size-adjust: 100%;
-      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+      font-family:-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      -webkit-text-size-adjust:100%;
+      padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     }
     .app { min-height:100vh; padding:14px 18px 18px; }
-    .header { display:flex; align-items:center; gap:7px; }
+    .header {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .brand { display:flex; align-items:center; gap:7px; min-width:0; }
     .drop { font-size:28px; line-height:1; }
     .title { font-size:25px; font-weight:700; line-height:1.2; }
-    #status { height:34px; padding:8px 0; font-size:13px; color:#333; }
+    .edit-btn {
+      appearance:none;
+      -webkit-appearance:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      min-width:84px;
+      height:38px;
+      padding:0 13px;
+      border:1px solid var(--drop-blue-dark);
+      border-radius:7px;
+      background:linear-gradient(#2f8ddd, var(--drop-blue));
+      color:#fff;
+      font-size:16px;
+      font-weight:700;
+      line-height:1;
+      box-shadow:0 3px 0 var(--drop-blue-dark), 0 4px 7px rgba(0,0,0,.16);
+      text-shadow:0 1px 0 rgba(0,0,0,.18);
+      cursor:pointer;
+      user-select:none;
+      -webkit-user-select:none;
+      transform:translateY(0);
+    }
+    .edit-btn:active {
+      transform:translateY(2px);
+      box-shadow:0 1px 0 var(--drop-blue-dark), 0 2px 4px rgba(0,0,0,.14);
+    }
+    .edit-btn[disabled] { opacity:.58; cursor:default; }
+    .pen { font-size:18px; line-height:1; }
+    #status { min-height:34px; padding:8px 0; font-size:13px; color:#333; }
     #notice {
       display:none;
       white-space:pre-wrap;
@@ -36,26 +77,120 @@
       user-select:text;
       -webkit-user-select:text;
     }
-    #error { display:none; font-size:16px; padding-top:18px; }
+    #editor {
+      display:none;
+      width:100%;
+      min-height:calc(100vh - 125px);
+      margin-top:10px;
+      padding:14px;
+      resize:vertical;
+      border:1px solid var(--border);
+      border-radius:8px;
+      outline:none;
+      background:#fff;
+      color:#111;
+      font:inherit;
+      font-size:19px;
+      line-height:1.28;
+      white-space:pre-wrap;
+      box-shadow:inset 0 1px 3px rgba(0,0,0,.08);
+    }
+    #editor:focus { border-color:var(--drop-blue); box-shadow:0 0 0 2px rgba(36,125,204,.15), inset 0 1px 3px rgba(0,0,0,.06); }
+    #error { display:none; font-size:16px; padding-top:18px; color:#b00020; }
+
+    .modal-backdrop {
+      display:none;
+      position:fixed;
+      inset:0;
+      z-index:1000;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      background:rgba(0,0,0,.34);
+    }
+    .modal-backdrop.show { display:flex; }
+    .modal {
+      width:min(330px, 100%);
+      background:#fff;
+      border-radius:13px;
+      padding:22px 20px 18px;
+      box-shadow:0 12px 35px rgba(0,0,0,.28);
+      text-align:center;
+    }
+    .modal-title { font-size:20px; font-weight:700; margin-bottom:14px; }
+    .pin-input {
+      width:150px;
+      height:48px;
+      padding:0 12px;
+      border:1px solid #b9c1c9;
+      border-radius:8px;
+      text-align:center;
+      font-size:24px;
+      letter-spacing:8px;
+      outline:none;
+    }
+    .pin-input:focus { border-color:var(--drop-blue); box-shadow:0 0 0 2px rgba(36,125,204,.14); }
+    .pin-error { min-height:24px; padding-top:7px; color:#c62828; font-size:14px; }
+    .modal-actions { display:flex; gap:9px; margin-top:9px; }
+    .modal-btn {
+      flex:1;
+      height:42px;
+      border-radius:7px;
+      border:1px solid #c5cbd1;
+      background:#f4f5f6;
+      font-size:16px;
+      font-weight:700;
+      cursor:pointer;
+    }
+    .modal-btn.primary { border-color:var(--drop-blue-dark); background:var(--drop-blue); color:#fff; }
   </style>
 </head>
 <body>
   <main class="app">
-    <div class="header"><span class="drop">💧</span><span class="title">소규모</span></div>
+    <div class="header">
+      <div class="brand"><span class="drop">💧</span><span class="title">소규모</span></div>
+      <button id="editButton" class="edit-btn" type="button" aria-label="공지 수정">
+        <span class="pen">✎</span><span id="editLabel">수정</span>
+      </button>
+    </div>
     <div id="status">로딩중</div>
     <div id="notice"></div>
+    <textarea id="editor" spellcheck="false" aria-label="공지 내용 수정"></textarea>
     <div id="error"></div>
   </main>
 
+  <div id="pinModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pinTitle">
+    <div class="modal">
+      <div id="pinTitle" class="modal-title">비밀번호 입력</div>
+      <input id="pinInput" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="4자리 비밀번호">
+      <div id="pinError" class="pin-error"></div>
+      <div class="modal-actions">
+        <button id="pinCancel" class="modal-btn" type="button">취소</button>
+        <button id="pinConfirm" class="modal-btn primary" type="button">확인</button>
+      </div>
+    </div>
+  </div>
+
 <script>
-// Google Apps Script 웹 앱 URL이 이미 설정되어 있습니다.
 const PROXY_URL = "https://script.google.com/macros/s/AKfycbyhPGeN1AdXtMQEHY653l_z1BJLQqtQwUety85UmJ9o4Hrm4DaNRmtISdt0rlh5Bi2q/exec";
 
 const statusEl = document.getElementById('status');
 const noticeEl = document.getElementById('notice');
+const editorEl = document.getElementById('editor');
 const errorEl = document.getElementById('error');
+const editButton = document.getElementById('editButton');
+const editLabel = document.getElementById('editLabel');
+const pinModal = document.getElementById('pinModal');
+const pinInput = document.getElementById('pinInput');
+const pinError = document.getElementById('pinError');
+const pinCancel = document.getElementById('pinCancel');
+const pinConfirm = document.getElementById('pinConfirm');
+
 let loading = true;
 let frame = 0;
+let editMode = false;
+let adminPin = '';
+let currentText = '';
 const frames = ['로딩중', '로딩중.', '로딩중..', '로딩중...'];
 
 const timer = setInterval(() => {
@@ -68,61 +203,181 @@ function finishLoading() {
   clearInterval(timer);
 }
 
-function showError(message) {
-  finishLoading();
-  statusEl.textContent = '';
-  noticeEl.style.display = 'none';
-  errorEl.style.display = 'block';
-  errorEl.textContent = message;
-}
-
-function showNotice(text) {
-  finishLoading();
-  errorEl.style.display = 'none';
-  noticeEl.textContent = text && text.trim() ? text : 'notice.txt가 비어 있습니다.';
-  noticeEl.style.display = 'block';
+function nowLabel(prefix) {
   const d = new Date();
   const mm = String(d.getMonth()+1).padStart(2,'0');
   const dd = String(d.getDate()).padStart(2,'0');
   const hh = String(d.getHours()).padStart(2,'0');
   const mi = String(d.getMinutes()).padStart(2,'0');
-  statusEl.textContent = `최종 확인: ${mm}/${dd} ${hh}:${mi}`;
+  return `${prefix}: ${mm}/${dd} ${hh}:${mi}`;
 }
 
-function loadNotice() {
-  if (!PROXY_URL.startsWith('https://script.google.com/macros/s/') || !PROXY_URL.endsWith('/exec')) {
-    showError('웹앱 연결 주소 설정이 필요합니다.');
-    return;
-  }
+function showError(message) {
+  finishLoading();
+  statusEl.textContent = '';
+  noticeEl.style.display = 'none';
+  editorEl.style.display = 'none';
+  errorEl.style.display = 'block';
+  errorEl.textContent = message;
+}
 
-  const callbackName = '__sogyumo_' + Date.now();
-  const script = document.createElement('script');
-  const timeout = setTimeout(() => {
-    cleanup();
-    showError('내용을 불러오지 못했습니다.');
-  }, 10000);
+function showNotice(text, statusPrefix='최종 확인') {
+  finishLoading();
+  currentText = text || '';
+  errorEl.style.display = 'none';
+  editorEl.style.display = 'none';
+  noticeEl.textContent = currentText.trim() ? currentText : 'notice.txt가 비어 있습니다.';
+  noticeEl.style.display = 'block';
+  statusEl.textContent = nowLabel(statusPrefix);
+}
 
-  function cleanup() {
-    clearTimeout(timeout);
-    try { delete window[callbackName]; } catch (_) {}
-    script.remove();
-  }
+function jsonp(params, timeoutMs=10000) {
+  return new Promise((resolve, reject) => {
+    const callbackName = '__sogyumo_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('응답 시간이 초과되었습니다.'));
+    }, timeoutMs);
 
-  window[callbackName] = (payload) => {
-    cleanup();
+    function cleanup() {
+      clearTimeout(timeout);
+      try { delete window[callbackName]; } catch (_) {}
+      script.remove();
+    }
+
+    window[callbackName] = payload => {
+      cleanup();
+      resolve(payload || {});
+    };
+    script.onerror = () => {
+      cleanup();
+      reject(new Error('서버에 연결하지 못했습니다.'));
+    };
+
+    const query = new URLSearchParams({ ...params, callback: callbackName, t: Date.now().toString() });
+    script.src = PROXY_URL + '?' + query.toString();
+    document.head.appendChild(script);
+  });
+}
+
+async function loadNotice() {
+  try {
+    const payload = await jsonp({ action:'read' });
     if (payload && payload.ok) showNotice(payload.text || '');
     else showError('내용을 불러오지 못했습니다.');
-  };
-
-  script.onerror = () => {
-    cleanup();
+  } catch (_) {
     showError('내용을 불러오지 못했습니다.');
-  };
-
-  const sep = PROXY_URL.includes('?') ? '&' : '?';
-  script.src = PROXY_URL + sep + 'callback=' + encodeURIComponent(callbackName) + '&t=' + Date.now();
-  document.head.appendChild(script);
+  }
 }
+
+function openPinModal() {
+  pinInput.value = '';
+  pinError.textContent = '';
+  pinModal.classList.add('show');
+  setTimeout(() => pinInput.focus(), 50);
+}
+
+function closePinModal() {
+  pinModal.classList.remove('show');
+  pinError.textContent = '';
+}
+
+async function verifyPin() {
+  const pin = pinInput.value.trim();
+  if (!/^\d{4}$/.test(pin)) {
+    pinError.textContent = '4자리 숫자를 입력해주세요.';
+    return;
+  }
+  pinConfirm.disabled = true;
+  pinError.textContent = '확인중...';
+  try {
+    const payload = await jsonp({ action:'auth', pin });
+    if (payload.ok && payload.authorized) {
+      adminPin = pin;
+      closePinModal();
+      enterEditMode();
+    } else {
+      pinError.textContent = '비밀번호가 올바르지 않습니다.';
+      pinInput.select();
+    }
+  } catch (_) {
+    pinError.textContent = '비밀번호를 확인하지 못했습니다.';
+  } finally {
+    pinConfirm.disabled = false;
+  }
+}
+
+function enterEditMode() {
+  editMode = true;
+  editLabel.textContent = '저장';
+  noticeEl.style.display = 'none';
+  errorEl.style.display = 'none';
+  editorEl.value = currentText;
+  editorEl.style.display = 'block';
+  statusEl.textContent = '수정 중';
+  setTimeout(() => {
+    editorEl.focus();
+    editorEl.setSelectionRange(editorEl.value.length, editorEl.value.length);
+  }, 30);
+}
+
+async function saveNotice() {
+  if (!editMode || !adminPin) return;
+  const text = editorEl.value;
+  editButton.disabled = true;
+  editLabel.textContent = '저장중';
+  statusEl.textContent = '저장중...';
+
+  const token = Date.now().toString(36) + Math.random().toString(36).slice(2,10);
+  const CHUNK_SIZE = 600;
+  const chunks = [];
+  for (let i = 0; i < text.length; i += CHUNK_SIZE) chunks.push(text.slice(i, i + CHUNK_SIZE));
+  if (chunks.length === 0) chunks.push('');
+
+  try {
+    let p = await jsonp({ action:'saveStart', pin:adminPin, token });
+    if (!p.ok) throw new Error(p.error || '저장을 시작하지 못했습니다.');
+
+    for (let i = 0; i < chunks.length; i++) {
+      p = await jsonp({ action:'saveChunk', pin:adminPin, token, index:String(i), data:chunks[i] });
+      if (!p.ok) throw new Error(p.error || '저장 중 오류가 발생했습니다.');
+    }
+
+    p = await jsonp({ action:'saveFinish', pin:adminPin, token, count:String(chunks.length) }, 15000);
+    if (!p.ok) throw new Error(p.error || '저장하지 못했습니다.');
+
+    currentText = text;
+    editMode = false;
+    adminPin = '';
+    editLabel.textContent = '수정';
+    showNotice(currentText, '저장 완료');
+  } catch (err) {
+    statusEl.textContent = '저장 실패';
+    alert('저장하지 못했습니다.\n' + (err && err.message ? err.message : '잠시 후 다시 시도해주세요.'));
+    editLabel.textContent = '저장';
+  } finally {
+    editButton.disabled = false;
+  }
+}
+
+editButton.addEventListener('click', () => {
+  if (editMode) saveNotice();
+  else openPinModal();
+});
+pinCancel.addEventListener('click', closePinModal);
+pinConfirm.addEventListener('click', verifyPin);
+pinInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') verifyPin();
+  if (e.key === 'Escape') closePinModal();
+});
+pinInput.addEventListener('input', () => {
+  pinInput.value = pinInput.value.replace(/\D/g, '').slice(0,4);
+  pinError.textContent = '';
+});
+pinModal.addEventListener('click', e => {
+  if (e.target === pinModal) closePinModal();
+});
 
 loadNotice();
 </script>

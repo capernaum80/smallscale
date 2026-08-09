@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="소규모">
+  <meta name="format-detection" content="telephone=no">
+  <title>소규모</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; min-height:100%; background:#fff; color:#111; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      -webkit-text-size-adjust: 100%;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    .app { min-height:100vh; padding:14px 18px 18px; }
+    .header { display:flex; align-items:center; gap:7px; }
+    .drop { font-size:28px; line-height:1; }
+    .title { font-size:25px; font-weight:700; line-height:1.2; }
+    #status { height:34px; padding:8px 0; font-size:13px; color:#333; }
+    #notice {
+      display:none;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+      font-size:19px;
+      line-height:1.28;
+      padding:18px 0;
+      user-select:text;
+      -webkit-user-select:text;
+    }
+    #error { display:none; font-size:16px; padding-top:18px; }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="header"><span class="drop">💧</span><span class="title">소규모</span></div>
+    <div id="status">로딩중</div>
+    <div id="notice"></div>
+    <div id="error"></div>
+  </main>
+
+<script>
+// Google Apps Script 웹 앱 URL이 이미 설정되어 있습니다.
+const PROXY_URL = "https://script.google.com/macros/s/AKfycbyhPGeN1AdXtMQEHY653l_z1BJLQqtQwUety85UmJ9o4Hrm4DaNRmtISdt0rlh5Bi2q/exec";
+
+const statusEl = document.getElementById('status');
+const noticeEl = document.getElementById('notice');
+const errorEl = document.getElementById('error');
+let loading = true;
+let frame = 0;
+const frames = ['로딩중', '로딩중.', '로딩중..', '로딩중...'];
+
+const timer = setInterval(() => {
+  if (!loading) return;
+  statusEl.textContent = frames[frame++ % frames.length];
+}, 180);
+
+function finishLoading() {
+  loading = false;
+  clearInterval(timer);
+}
+
+function showError(message) {
+  finishLoading();
+  statusEl.textContent = '';
+  noticeEl.style.display = 'none';
+  errorEl.style.display = 'block';
+  errorEl.textContent = message;
+}
+
+function showNotice(text) {
+  finishLoading();
+  errorEl.style.display = 'none';
+  noticeEl.textContent = text && text.trim() ? text : 'notice.txt가 비어 있습니다.';
+  noticeEl.style.display = 'block';
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mi = String(d.getMinutes()).padStart(2,'0');
+  statusEl.textContent = `최종 확인: ${mm}/${dd} ${hh}:${mi}`;
+}
+
+function loadNotice() {
+  if (!PROXY_URL.startsWith('https://script.google.com/macros/s/') || !PROXY_URL.endsWith('/exec')) {
+    showError('웹앱 연결 주소 설정이 필요합니다.');
+    return;
+  }
+
+  const callbackName = '__sogyumo_' + Date.now();
+  const script = document.createElement('script');
+  const timeout = setTimeout(() => {
+    cleanup();
+    showError('내용을 불러오지 못했습니다.');
+  }, 10000);
+
+  function cleanup() {
+    clearTimeout(timeout);
+    try { delete window[callbackName]; } catch (_) {}
+    script.remove();
+  }
+
+  window[callbackName] = (payload) => {
+    cleanup();
+    if (payload && payload.ok) showNotice(payload.text || '');
+    else showError('내용을 불러오지 못했습니다.');
+  };
+
+  script.onerror = () => {
+    cleanup();
+    showError('내용을 불러오지 못했습니다.');
+  };
+
+  const sep = PROXY_URL.includes('?') ? '&' : '?';
+  script.src = PROXY_URL + sep + 'callback=' + encodeURIComponent(callbackName) + '&t=' + Date.now();
+  document.head.appendChild(script);
+}
+
+loadNotice();
+</script>
+</body>
+</html>

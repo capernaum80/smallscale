@@ -264,7 +264,7 @@ function showAddress(text) {
   noticeEl.style.display = 'block';
   statusEl.textContent = nowLabel('주소록 확인');
 
-  addressButton.disabled = true;
+  addressButton.style.display = 'none';
   editIcon.textContent = '←';
   editLabel.textContent = '이전';
   editButton.setAttribute('aria-label', '공지 화면으로 돌아가기');
@@ -272,7 +272,7 @@ function showAddress(text) {
 
 function returnToNotice() {
   viewMode = 'notice';
-  addressButton.disabled = false;
+  addressButton.style.display = 'inline-flex';
   editIcon.textContent = '✎';
   editLabel.textContent = '수정';
   editButton.setAttribute('aria-label', '공지 수정');
@@ -323,7 +323,7 @@ async function loadAddress() {
   if (editMode) return;
 
   viewMode = 'address';
-  addressButton.disabled = true;
+  addressButton.style.display = 'none';
   editIcon.textContent = '←';
   editLabel.textContent = '이전';
   editButton.setAttribute('aria-label', '공지 화면으로 돌아가기');
@@ -425,6 +425,7 @@ async function saveNotice() {
     adminPin = '';
     editIcon.textContent = '✎';
     editLabel.textContent = '수정';
+    addressButton.style.display = 'inline-flex';
     addressButton.disabled = false;
     showNotice(currentText, '저장 완료');
   } catch (err) {

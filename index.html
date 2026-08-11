@@ -36,7 +36,9 @@
     .brand { display:flex; align-items:center; gap:7px; min-width:0; }
     .drop { font-size:28px; line-height:1; }
     .title { font-size:25px; font-weight:700; line-height:1.2; }
-    .edit-btn {
+    .header-actions { display:flex; align-items:center; gap:9px; }
+    .edit-btn,
+    .address-btn {
       appearance:none;
       -webkit-appearance:none;
       display:inline-flex;
@@ -149,9 +151,14 @@
   <main class="app">
     <div class="header">
       <div class="brand"><span class="drop">💧</span><span class="title">소규모</span></div>
-      <button id="editButton" class="edit-btn" type="button" aria-label="공지 수정">
-        <span class="pen">✎</span><span id="editLabel">수정</span>
-      </button>
+      <div class="header-actions">
+        <button id="addressButton" class="address-btn" type="button" aria-label="주소록 열기">
+          <span>주소록</span>
+        </button>
+        <button id="editButton" class="edit-btn" type="button" aria-label="공지 수정">
+          <span id="editIcon" class="pen">✎</span><span id="editLabel">수정</span>
+        </button>
+      </div>
     </div>
     <div id="status">로딩중</div>
     <div id="notice"></div>
@@ -178,7 +185,9 @@ const statusEl = document.getElementById('status');
 const noticeEl = document.getElementById('notice');
 const editorEl = document.getElementById('editor');
 const errorEl = document.getElementById('error');
+const addressButton = document.getElementById('addressButton');
 const editButton = document.getElementById('editButton');
+const editIcon = document.getElementById('editIcon');
 const editLabel = document.getElementById('editLabel');
 const pinModal = document.getElementById('pinModal');
 const pinInput = document.getElementById('pinInput');
@@ -191,16 +200,27 @@ let frame = 0;
 let editMode = false;
 let adminPin = '';
 let currentText = '';
+let addressText = '';
+let viewMode = 'notice';
 const frames = ['로딩중', '로딩중.', '로딩중..', '로딩중...'];
 
-const timer = setInterval(() => {
-  if (!loading) return;
-  statusEl.textContent = frames[frame++ % frames.length];
-}, 180);
+let timer = null;
+
+function startLoading(label='로딩중') {
+  loading = true;
+  frame = 0;
+  if (timer) clearInterval(timer);
+  statusEl.textContent = label;
+  timer = setInterval(() => {
+    if (!loading) return;
+    statusEl.textContent = frames[frame++ % frames.length];
+  }, 180);
+}
 
 function finishLoading() {
   loading = false;
-  clearInterval(timer);
+  if (timer) clearInterval(timer);
+  timer = null;
 }
 
 function nowLabel(prefix) {
@@ -229,6 +249,34 @@ function showNotice(text, statusPrefix='최종 확인') {
   noticeEl.textContent = currentText.trim() ? currentText : 'notice.txt가 비어 있습니다.';
   noticeEl.style.display = 'block';
   statusEl.textContent = nowLabel(statusPrefix);
+}
+
+function showAddress(text) {
+  finishLoading();
+  addressText = text || '';
+  viewMode = 'address';
+  editMode = false;
+  adminPin = '';
+
+  errorEl.style.display = 'none';
+  editorEl.style.display = 'none';
+  noticeEl.textContent = addressText.trim() ? addressText : '주소록이 비어 있습니다.';
+  noticeEl.style.display = 'block';
+  statusEl.textContent = nowLabel('주소록 확인');
+
+  addressButton.disabled = true;
+  editIcon.textContent = '←';
+  editLabel.textContent = '이전';
+  editButton.setAttribute('aria-label', '공지 화면으로 돌아가기');
+}
+
+function returnToNotice() {
+  viewMode = 'notice';
+  addressButton.disabled = false;
+  editIcon.textContent = '✎';
+  editLabel.textContent = '수정';
+  editButton.setAttribute('aria-label', '공지 수정');
+  showNotice(currentText, '최종 확인');
 }
 
 function jsonp(params, timeoutMs=10000) {
@@ -271,6 +319,29 @@ async function loadNotice() {
   }
 }
 
+async function loadAddress() {
+  if (editMode) return;
+
+  viewMode = 'address';
+  addressButton.disabled = true;
+  editIcon.textContent = '←';
+  editLabel.textContent = '이전';
+  editButton.setAttribute('aria-label', '공지 화면으로 돌아가기');
+
+  noticeEl.style.display = 'none';
+  editorEl.style.display = 'none';
+  errorEl.style.display = 'none';
+  startLoading('주소록 불러오는 중');
+
+  try {
+    const payload = await jsonp({ action:'address' });
+    if (payload && payload.ok) showAddress(payload.text || '');
+    else showError('주소록을 불러오지 못했습니다.');
+  } catch (_) {
+    showError('주소록을 불러오지 못했습니다.');
+  }
+}
+
 function openPinModal() {
   pinInput.value = '';
   pinError.textContent = '';
@@ -309,6 +380,8 @@ async function verifyPin() {
 }
 
 function enterEditMode() {
+  viewMode = 'notice';
+  addressButton.disabled = true;
   editMode = true;
   editLabel.textContent = '저장';
   noticeEl.style.display = 'none';
@@ -350,7 +423,9 @@ async function saveNotice() {
     currentText = text;
     editMode = false;
     adminPin = '';
+    editIcon.textContent = '✎';
     editLabel.textContent = '수정';
+    addressButton.disabled = false;
     showNotice(currentText, '저장 완료');
   } catch (err) {
     statusEl.textContent = '저장 실패';
@@ -361,7 +436,13 @@ async function saveNotice() {
   }
 }
 
+addressButton.addEventListener('click', loadAddress);
+
 editButton.addEventListener('click', () => {
+  if (viewMode === 'address') {
+    returnToNotice();
+    return;
+  }
   if (editMode) saveNotice();
   else openPinModal();
 });
@@ -379,6 +460,7 @@ pinModal.addEventListener('click', e => {
   if (e.target === pinModal) closePinModal();
 });
 
+startLoading();
 loadNotice();
 </script>
 </body>

@@ -12,6 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+
   <style>
     :root {
       color-scheme: light;
@@ -37,6 +38,7 @@
     .drop { font-size:28px; line-height:1; }
     .title { font-size:25px; font-weight:700; line-height:1.2; }
     .header-actions { display:flex; align-items:center; gap:9px; }
+
     .edit-btn,
     .address-btn {
       appearance:none;
@@ -62,13 +64,22 @@
       -webkit-user-select:none;
       transform:translateY(0);
     }
-    .edit-btn:active {
+    .edit-btn:active,
+    .address-btn:active {
       transform:translateY(2px);
       box-shadow:0 1px 0 var(--drop-blue-dark), 0 2px 4px rgba(0,0,0,.14);
     }
-    .edit-btn[disabled] { opacity:.58; cursor:default; }
+    .edit-btn[disabled],
+    .address-btn[disabled] { opacity:.58; cursor:default; }
+
     .pen { font-size:18px; line-height:1; }
-    #status { min-height:34px; padding:8px 0; font-size:13px; color:#333; }
+
+    #status {
+      min-height:34px;
+      padding:8px 0;
+      font-size:13px;
+      color:#333;
+    }
     #notice {
       display:none;
       white-space:pre-wrap;
@@ -97,8 +108,16 @@
       white-space:pre-wrap;
       box-shadow:inset 0 1px 3px rgba(0,0,0,.08);
     }
-    #editor:focus { border-color:var(--drop-blue); box-shadow:0 0 0 2px rgba(36,125,204,.15), inset 0 1px 3px rgba(0,0,0,.06); }
-    #error { display:none; font-size:16px; padding-top:18px; color:#b00020; }
+    #editor:focus {
+      border-color:var(--drop-blue);
+      box-shadow:0 0 0 2px rgba(36,125,204,.15), inset 0 1px 3px rgba(0,0,0,.06);
+    }
+    #error {
+      display:none;
+      font-size:16px;
+      padding-top:18px;
+      color:#b00020;
+    }
 
     .modal-backdrop {
       display:none;
@@ -131,7 +150,10 @@
       letter-spacing:8px;
       outline:none;
     }
-    .pin-input:focus { border-color:var(--drop-blue); box-shadow:0 0 0 2px rgba(36,125,204,.14); }
+    .pin-input:focus {
+      border-color:var(--drop-blue);
+      box-shadow:0 0 0 2px rgba(36,125,204,.14);
+    }
     .pin-error { min-height:24px; padding-top:7px; color:#c62828; font-size:14px; }
     .modal-actions { display:flex; gap:9px; margin-top:9px; }
     .modal-btn {
@@ -144,9 +166,14 @@
       font-weight:700;
       cursor:pointer;
     }
-    .modal-btn.primary { border-color:var(--drop-blue-dark); background:var(--drop-blue); color:#fff; }
+    .modal-btn.primary {
+      border-color:var(--drop-blue-dark);
+      background:var(--drop-blue);
+      color:#fff;
+    }
   </style>
 </head>
+
 <body>
   <main class="app">
     <div class="header">
@@ -160,6 +187,7 @@
         </button>
       </div>
     </div>
+
     <div id="status">로딩중</div>
     <div id="notice"></div>
     <textarea id="editor" spellcheck="false" aria-label="공지 내용 수정"></textarea>
@@ -169,7 +197,8 @@
   <div id="pinModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pinTitle">
     <div class="modal">
       <div id="pinTitle" class="modal-title">비밀번호 입력</div>
-      <input id="pinInput" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="4자리 비밀번호">
+      <input id="pinInput" class="pin-input" type="password" inputmode="numeric"
+             pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="4자리 비밀번호">
       <div id="pinError" class="pin-error"></div>
       <div class="modal-actions">
         <button id="pinCancel" class="modal-btn" type="button">취소</button>
@@ -180,6 +209,14 @@
 
 <script>
 const PROXY_URL = "https://script.google.com/macros/s/AKfycbyhPGeN1AdXtMQEHY653l_z1BJLQqtQwUety85UmJ9o4Hrm4DaNRmtISdt0rlh5Bi2q/exec";
+
+// 안정성 설정
+const REQUEST_TIMEOUT_MS = 20000;       // 한 번의 요청은 최대 20초까지 기다림
+const READ_ATTEMPTS = 3;                // 공지/주소록 최대 3회 시도
+const WRITE_ATTEMPTS = 3;               // 인증/저장도 일시 오류 시 재시도
+const RETRY_DELAYS_MS = [800, 1500];    // 1→2회, 2→3회 사이 대기
+const NOTICE_CACHE_KEY = 'sogyumo_notice_cache_v2';
+const ADDRESS_CACHE_KEY = 'sogyumo_address_cache_v2';
 
 const statusEl = document.getElementById('status');
 const noticeEl = document.getElementById('notice');
@@ -202,9 +239,16 @@ let adminPin = '';
 let currentText = '';
 let addressText = '';
 let viewMode = 'notice';
+let timer = null;
+
+// 화면 전환 중 늦게 도착한 과거 응답이 현재 화면을 덮어쓰는 것을 방지
+let viewRequestId = 0;
+
 const frames = ['로딩중', '로딩중.', '로딩중..', '로딩중...'];
 
-let timer = null;
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function startLoading(label='로딩중') {
   loading = true;
@@ -232,6 +276,42 @@ function nowLabel(prefix) {
   return `${prefix}: ${mm}/${dd} ${hh}:${mi}`;
 }
 
+function formatSavedTime(timestamp) {
+  const d = new Date(Number(timestamp));
+  if (Number.isNaN(d.getTime())) return '';
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mi = String(d.getMinutes()).padStart(2,'0');
+  return `${mm}/${dd} ${hh}:${mi}`;
+}
+
+function saveLocalCache(key, text) {
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      text: String(text == null ? '' : text),
+      savedAt: Date.now()
+    }));
+  } catch (_) {
+    // localStorage 사용이 제한된 환경이어도 앱 자체는 계속 동작
+  }
+}
+
+function loadLocalCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data.text !== 'string') return null;
+    return {
+      text: data.text,
+      savedAt: Number(data.savedAt) || 0
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 function showError(message) {
   finishLoading();
   statusEl.textContent = '';
@@ -241,49 +321,73 @@ function showError(message) {
   errorEl.textContent = message;
 }
 
-function showNotice(text, statusPrefix='최종 확인') {
-  finishLoading();
-  currentText = text || '';
-  errorEl.style.display = 'none';
-  editorEl.style.display = 'none';
-  noticeEl.textContent = currentText.trim() ? currentText : 'notice.txt가 비어 있습니다.';
-  noticeEl.style.display = 'block';
-  statusEl.textContent = nowLabel(statusPrefix);
+function setNoticeButtons() {
+  viewMode = 'notice';
+  addressButton.disabled = false;
+  editIcon.textContent = '✎';
+  editLabel.textContent = '수정';
+  editButton.setAttribute('aria-label', '공지 수정');
 }
 
-function showAddress(text) {
-  finishLoading();
-  addressText = text || '';
+function setAddressButtons() {
   viewMode = 'address';
-  editMode = false;
-  adminPin = '';
-
-  errorEl.style.display = 'none';
-  editorEl.style.display = 'none';
-  noticeEl.textContent = addressText.trim() ? addressText : '주소록이 비어 있습니다.';
-  noticeEl.style.display = 'block';
-  statusEl.textContent = nowLabel('주소록 확인');
-
-  addressButton.style.display = 'none';
+  addressButton.disabled = true;
   editIcon.textContent = '←';
   editLabel.textContent = '이전';
   editButton.setAttribute('aria-label', '공지 화면으로 돌아가기');
 }
 
-function returnToNotice() {
-  viewMode = 'notice';
-  addressButton.style.display = 'inline-flex';
-  editIcon.textContent = '✎';
-  editLabel.textContent = '수정';
-  editButton.setAttribute('aria-label', '공지 수정');
-  showNotice(currentText, '최종 확인');
+function showNotice(text, statusText) {
+  finishLoading();
+  currentText = String(text == null ? '' : text);
+  setNoticeButtons();
+  errorEl.style.display = 'none';
+  editorEl.style.display = 'none';
+  noticeEl.textContent = currentText.trim() ? currentText : 'notice.txt가 비어 있습니다.';
+  noticeEl.style.display = 'block';
+  statusEl.textContent = statusText || nowLabel('최종 확인');
 }
 
-function jsonp(params, timeoutMs=10000) {
+function showAddress(text, statusText) {
+  finishLoading();
+  addressText = String(text == null ? '' : text);
+  editMode = false;
+  adminPin = '';
+  setAddressButtons();
+  errorEl.style.display = 'none';
+  editorEl.style.display = 'none';
+  noticeEl.textContent = addressText.trim() ? addressText : '주소록이 비어 있습니다.';
+  noticeEl.style.display = 'block';
+  statusEl.textContent = statusText || nowLabel('주소록 확인');
+}
+
+function showNoticeFromCache(cache) {
+  currentText = cache.text;
+  showNotice(
+    cache.text,
+    '서버 연결 실패 · 마지막 확인: ' + formatSavedTime(cache.savedAt)
+  );
+}
+
+function showAddressFromCache(cache) {
+  addressText = cache.text;
+  showAddress(
+    cache.text,
+    '서버 연결 실패 · 마지막 확인: ' + formatSavedTime(cache.savedAt)
+  );
+}
+
+function jsonp(params, timeoutMs=REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
-    const callbackName = '__sogyumo_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const callbackName =
+      '__sogyumo_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+
     const script = document.createElement('script');
+    let settled = false;
+
     const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       cleanup();
       reject(new Error('응답 시간이 초과되었습니다.'));
     }, timeoutMs);
@@ -291,42 +395,115 @@ function jsonp(params, timeoutMs=10000) {
     function cleanup() {
       clearTimeout(timeout);
       try { delete window[callbackName]; } catch (_) {}
-      script.remove();
+      try { script.remove(); } catch (_) {}
     }
 
     window[callbackName] = payload => {
+      if (settled) return;
+      settled = true;
       cleanup();
       resolve(payload || {});
     };
+
     script.onerror = () => {
+      if (settled) return;
+      settled = true;
       cleanup();
       reject(new Error('서버에 연결하지 못했습니다.'));
     };
 
-    const query = new URLSearchParams({ ...params, callback: callbackName, t: Date.now().toString() });
+    const query = new URLSearchParams({
+      ...params,
+      callback: callbackName,
+      t: Date.now().toString()
+    });
+
     script.src = PROXY_URL + '?' + query.toString();
+    script.async = true;
     document.head.appendChild(script);
   });
 }
 
+async function requestWithRetry(params, options={}) {
+  const attempts = Math.max(1, Number(options.attempts || READ_ATTEMPTS));
+  const timeoutMs = Number(options.timeoutMs || REQUEST_TIMEOUT_MS);
+  const onRetry = typeof options.onRetry === 'function' ? options.onRetry : null;
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const payload = await jsonp(params, timeoutMs);
+
+      if (!payload || !payload.ok) {
+        throw new Error(
+          payload && payload.error ? payload.error : '서버 응답이 올바르지 않습니다.'
+        );
+      }
+
+      return payload;
+    } catch (err) {
+      lastError = err;
+
+      if (attempt >= attempts) break;
+
+      if (onRetry) onRetry(attempt + 1, attempts, err);
+
+      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)] || 1000;
+      await sleep(delay);
+    }
+  }
+
+  throw lastError || new Error('요청에 실패했습니다.');
+}
+
 async function loadNotice() {
+  if (editMode) return;
+
+  const myRequestId = ++viewRequestId;
+  setNoticeButtons();
+
+  noticeEl.style.display = 'none';
+  editorEl.style.display = 'none';
+  errorEl.style.display = 'none';
+  startLoading('공지 불러오는 중');
+
   try {
-    const payload = await jsonp({ action:'read' });
-    if (payload && payload.ok) showNotice(payload.text || '');
-    else showError('내용을 불러오지 못했습니다.');
-  } catch (_) {
-    showError('내용을 불러오지 못했습니다.');
+    const payload = await requestWithRetry(
+      { action:'read' },
+      {
+        attempts: READ_ATTEMPTS,
+        onRetry: (next, total) => {
+          if (myRequestId !== viewRequestId) return;
+          finishLoading();
+          statusEl.textContent = `연결 재시도 중 (${next}/${total})`;
+        }
+      }
+    );
+
+    if (myRequestId !== viewRequestId || viewMode !== 'notice') return;
+
+    const text = payload.text || '';
+    currentText = text;
+    saveLocalCache(NOTICE_CACHE_KEY, text);
+    showNotice(text, nowLabel('최종 확인'));
+  } catch (err) {
+    if (myRequestId !== viewRequestId || viewMode !== 'notice') return;
+
+    const cache = loadLocalCache(NOTICE_CACHE_KEY);
+    if (cache) {
+      showNoticeFromCache(cache);
+    } else {
+      showError('내용을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+    }
   }
 }
 
 async function loadAddress() {
   if (editMode) return;
 
-  viewMode = 'address';
-  addressButton.style.display = 'none';
-  editIcon.textContent = '←';
-  editLabel.textContent = '이전';
-  editButton.setAttribute('aria-label', '공지 화면으로 돌아가기');
+  const myRequestId = ++viewRequestId;
+  setAddressButtons();
 
   noticeEl.style.display = 'none';
   editorEl.style.display = 'none';
@@ -334,12 +511,42 @@ async function loadAddress() {
   startLoading('주소록 불러오는 중');
 
   try {
-    const payload = await jsonp({ action:'address' });
-    if (payload && payload.ok) showAddress(payload.text || '');
-    else showError('주소록을 불러오지 못했습니다.');
-  } catch (_) {
-    showError('주소록을 불러오지 못했습니다.');
+    const payload = await requestWithRetry(
+      { action:'address' },
+      {
+        attempts: READ_ATTEMPTS,
+        onRetry: (next, total) => {
+          if (myRequestId !== viewRequestId) return;
+          finishLoading();
+          statusEl.textContent = `주소록 연결 재시도 중 (${next}/${total})`;
+        }
+      }
+    );
+
+    if (myRequestId !== viewRequestId || viewMode !== 'address') return;
+
+    const text = payload.text || '';
+    addressText = text;
+    saveLocalCache(ADDRESS_CACHE_KEY, text);
+    showAddress(text, nowLabel('주소록 확인'));
+  } catch (err) {
+    if (myRequestId !== viewRequestId || viewMode !== 'address') return;
+
+    const cache = loadLocalCache(ADDRESS_CACHE_KEY);
+    if (cache) {
+      showAddressFromCache(cache);
+    } else {
+      showError('주소록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+    }
   }
+}
+
+function returnToNotice() {
+  // 핵심 수정:
+  // 기존 currentText를 그대로 표시하지 않고 Drive의 notice.txt를 다시 읽음
+  ++viewRequestId; // 진행 중이던 주소록 요청 무효화
+  setNoticeButtons();
+  loadNotice();
 }
 
 function openPinModal() {
@@ -356,15 +563,27 @@ function closePinModal() {
 
 async function verifyPin() {
   const pin = pinInput.value.trim();
+
   if (!/^\d{4}$/.test(pin)) {
     pinError.textContent = '4자리 숫자를 입력해주세요.';
     return;
   }
+
   pinConfirm.disabled = true;
   pinError.textContent = '확인중...';
+
   try {
-    const payload = await jsonp({ action:'auth', pin });
-    if (payload.ok && payload.authorized) {
+    const payload = await requestWithRetry(
+      { action:'auth', pin },
+      {
+        attempts: WRITE_ATTEMPTS,
+        onRetry: (next, total) => {
+          pinError.textContent = `연결 재시도 중 (${next}/${total})`;
+        }
+      }
+    );
+
+    if (payload.authorized) {
       adminPin = pin;
       closePinModal();
       enterEditMode();
@@ -373,13 +592,14 @@ async function verifyPin() {
       pinInput.select();
     }
   } catch (_) {
-    pinError.textContent = '비밀번호를 확인하지 못했습니다.';
+    pinError.textContent = '비밀번호를 확인하지 못했습니다. 다시 시도해주세요.';
   } finally {
     pinConfirm.disabled = false;
   }
 }
 
 function enterEditMode() {
+  ++viewRequestId;
   viewMode = 'notice';
   addressButton.disabled = true;
   editMode = true;
@@ -389,51 +609,91 @@ function enterEditMode() {
   editorEl.value = currentText;
   editorEl.style.display = 'block';
   statusEl.textContent = '수정 중';
+
   setTimeout(() => {
     editorEl.focus();
     editorEl.setSelectionRange(editorEl.value.length, editorEl.value.length);
   }, 30);
 }
 
+async function saveRequest(params, timeoutMs=REQUEST_TIMEOUT_MS) {
+  return requestWithRetry(params, {
+    attempts: WRITE_ATTEMPTS,
+    timeoutMs,
+    onRetry: (next, total) => {
+      statusEl.textContent = `저장 연결 재시도 중 (${next}/${total})`;
+    }
+  });
+}
+
 async function saveNotice() {
   if (!editMode || !adminPin) return;
+
   const text = editorEl.value;
   editButton.disabled = true;
+  addressButton.disabled = true;
   editLabel.textContent = '저장중';
   statusEl.textContent = '저장중...';
 
-  const token = Date.now().toString(36) + Math.random().toString(36).slice(2,10);
+  const token =
+    Date.now().toString(36) + Math.random().toString(36).slice(2,10);
+
   const CHUNK_SIZE = 600;
   const chunks = [];
-  for (let i = 0; i < text.length; i += CHUNK_SIZE) chunks.push(text.slice(i, i + CHUNK_SIZE));
+
+  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+    chunks.push(text.slice(i, i + CHUNK_SIZE));
+  }
   if (chunks.length === 0) chunks.push('');
 
   try {
-    let p = await jsonp({ action:'saveStart', pin:adminPin, token });
+    let p = await saveRequest({
+      action:'saveStart',
+      pin:adminPin,
+      token
+    });
     if (!p.ok) throw new Error(p.error || '저장을 시작하지 못했습니다.');
 
     for (let i = 0; i < chunks.length; i++) {
-      p = await jsonp({ action:'saveChunk', pin:adminPin, token, index:String(i), data:chunks[i] });
+      p = await saveRequest({
+        action:'saveChunk',
+        pin:adminPin,
+        token,
+        index:String(i),
+        data:chunks[i]
+      });
       if (!p.ok) throw new Error(p.error || '저장 중 오류가 발생했습니다.');
     }
 
-    p = await jsonp({ action:'saveFinish', pin:adminPin, token, count:String(chunks.length) }, 15000);
+    p = await saveRequest({
+      action:'saveFinish',
+      pin:adminPin,
+      token,
+      count:String(chunks.length)
+    }, 25000);
+
     if (!p.ok) throw new Error(p.error || '저장하지 못했습니다.');
 
-    currentText = text;
+    currentText = p.text != null ? String(p.text) : text;
+    saveLocalCache(NOTICE_CACHE_KEY, currentText);
+
     editMode = false;
     adminPin = '';
     editIcon.textContent = '✎';
     editLabel.textContent = '수정';
-    addressButton.style.display = 'inline-flex';
     addressButton.disabled = false;
-    showNotice(currentText, '저장 완료');
+
+    showNotice(currentText, nowLabel('저장 완료'));
   } catch (err) {
     statusEl.textContent = '저장 실패';
-    alert('저장하지 못했습니다.\n' + (err && err.message ? err.message : '잠시 후 다시 시도해주세요.'));
+    alert(
+      '저장하지 못했습니다.\n' +
+      (err && err.message ? err.message : '잠시 후 다시 시도해주세요.')
+    );
     editLabel.textContent = '저장';
   } finally {
     editButton.disabled = false;
+    if (!editMode) addressButton.disabled = false;
   }
 }
 
@@ -444,21 +704,37 @@ editButton.addEventListener('click', () => {
     returnToNotice();
     return;
   }
+
   if (editMode) saveNotice();
   else openPinModal();
 });
+
 pinCancel.addEventListener('click', closePinModal);
 pinConfirm.addEventListener('click', verifyPin);
+
 pinInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') verifyPin();
   if (e.key === 'Escape') closePinModal();
 });
+
 pinInput.addEventListener('input', () => {
   pinInput.value = pinInput.value.replace(/\D/g, '').slice(0,4);
   pinError.textContent = '';
 });
+
 pinModal.addEventListener('click', e => {
   if (e.target === pinModal) closePinModal();
+});
+
+// 앱/홈 화면으로 다시 돌아왔을 때 공지 화면이라면 새 내용을 한 번 확인
+document.addEventListener('visibilitychange', () => {
+  if (
+    document.visibilityState === 'visible' &&
+    viewMode === 'notice' &&
+    !editMode
+  ) {
+    loadNotice();
+  }
 });
 
 startLoading();
